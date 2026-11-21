@@ -16,3 +16,7 @@
 - 版本号三段都写全，不省略末位零。
 - 提交信息与 git tag 用同一版本号，例如 `v1.2.0：新增收起后露出比例设置`。
 - 构建后用 `aapt2 dump badging app-release.apk | head -1` 核对包里真实版本号，不靠记忆。
+
+## README
+
+README 中不写签名相关板块（不列 keystore / 口令字段，不写签名配置步骤）。

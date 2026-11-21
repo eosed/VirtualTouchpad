@@ -14,6 +14,8 @@ foldables as well (Xiaomi MIX Fold / HyperOS first).
 
 - **Virtual joystick**: a translucent circular touch area in the bottom-right corner. Sliding your thumb
   inside it moves the cursor, a tap clicks at the cursor, holding still long-presses
+- **Flick to swipe**: flicks inside the pad (≥ 40dp of travel at ≥ 900dp/s) inject a swipe in the same
+  direction at the cursor — paging through photos, scrolling lists, switching pages, without lifting the thumb
 - **Moving the pad**: hold the outer ring for 3 seconds (one short vibration), then drag — the joystick can
   be placed anywhere
 - **Auto edge-hide**: after 10 s idle the whole pad slides off the screen edge, leaving only a small arc
@@ -27,7 +29,7 @@ foldables as well (Xiaomi MIX Fold / HyperOS first).
 ## Installation
 
 1. Download the APK from [Releases](../../releases) and install it
-   - The current release is **v1.3.0 (signed with the release key)**. If you installed v1.0 or a debug
+   - The current release is **v1.4.0 (signed with the release key)**. If you installed v1.0 or a debug
      build before, **uninstall it first** — a different signature cannot overwrite; v1.1 and later upgrade
      in place
 2. Open the app; it asks for the accessibility permission on first launch. This is required: drawing over
@@ -72,19 +74,6 @@ mainland China; replace it with the official source if you prefer.
 - System-UI occlusion detection: lock screen (KeyguardManager) → notification shade (a `TYPE_SYSTEM`
   window taller than 60% of the screen) → IME (`TYPE_INPUT_METHOD` window height) → full screen (the
   status-bar window is gone or squeezed to zero height) → app list
-
-## Signing
-
-The repository ships no signing key or password; a release build needs your own:
-
-- Keep the keystore file and its passwords outside the repository. `keystore.properties` is a local file
-  in the repo root, excluded by `.gitignore`, and never distributed with the repo
-- For the fields it expects, see `signingConfigs.release` in `app/build.gradle`
-- Without that file, `assembleRelease` falls back to the debug key — anyone can clone and build without
-  configuring anything
-
-**Losing the key means permanently losing the ability to update this app's identity**, so back up the
-keystore file and its passwords, outside the repository as well.
 
 ## License
 

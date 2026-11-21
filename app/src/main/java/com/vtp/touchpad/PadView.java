@@ -11,6 +11,7 @@ import android.graphics.Shader;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
 
@@ -23,6 +24,7 @@ import android.view.animation.DecelerateInterpolator;
  *   外圈按住不动 3 秒（振动一下提示）→ 进入挪板模式，之后拖动即移动触控板位置；
  *   外圈落指后立刻移动 → 仍按普通规则处理，算移动光标；
  *   短促轻点（≤300ms、位移 ≤24dp）→ 单击，落在外圈也算；
+ *   单指快速甩动（速度 ≥900dp/s 且位移 ≥40dp）→ 甩动，在光标处注入同向滑动（翻页 / 滚动）；
  *   其余移动 → 移动光标。
  */
 class PadView extends View {
@@ -34,6 +36,9 @@ class PadView extends View {
         void onClick();
 
         void onLongPress();
+
+        /** 单指快速甩动：axis 0 横向 / 1 纵向，sign -1 与手指方向相反侧 / +1 同向。 */
+        void onFlick(int axis, int sign);
 
         /** 3 秒长按外圈确认，即将开始挪板（振动已在此发出）。 */
         void onPadDragStart();
@@ -69,6 +74,13 @@ class PadView extends View {
     private static final float KNOB_RATIO = 0.62f;
     /** 内圆最大偏移占外圆半径的比例。 */
     private static final float KNOB_TRAVEL = 0.30f;
+    /**
+     * 甩动翻页的判定门槛：松手瞬间速度 ≥ 900dp/s 且本次位移 ≥ 40dp 才算 flick。
+     * 正常推光标一般只有 200~400dp/s，两者区分得很开。
+     * ponytail: 阈值写死成常量，真机手感不合再调；不做设置项。
+     */
+    private static final float FLICK_VEL_DP = 900f;
+    private static final float FLICK_MIN_DISP_DP = 40f;
 
     private final Paint base = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint socket = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -100,6 +112,9 @@ class PadView extends View {
     private float maxDisp;
     private long downTime;
     private boolean moved, draggingPad, holdArmed;
+    /** 本次手势落过第二根手指 → 不算甩动（多指是挪板/误触）。 */
+    private boolean multiFinger;
+    private VelocityTracker vt;
     /** 外圈落指，正等待 3 秒长按转挪板。 */
     private boolean edgeHoldPending;
     /** 收起成贴边小点时禁止挪板：此时点一下只该唤醒，不该拖着走。 */
@@ -398,9 +413,14 @@ class PadView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent e) {
+        if (vt != null) vt.addMovement(e);
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {
                 if (!insideCircle(e.getX(), e.getY())) return false;
+                if (vt == null) vt = VelocityTracker.obtain();
+                vt.clear();
+                vt.addMovement(e);
+                multiFinger = false;
                 if (listener != null) listener.onTouchDown();
                 resetIdle();
                 if (spring != null) spring.cancel();
@@ -427,6 +447,7 @@ class PadView extends View {
 
             case MotionEvent.ACTION_POINTER_DOWN:
                 // 第二根手指落下 → 同样进入挪板，但也要多按一会儿，避免误触
+                multiFinger = true;
                 handler.removeCallbacks(holdRunnable);
                 return true;
 
@@ -485,6 +506,14 @@ class PadView extends View {
             case MotionEvent.ACTION_CANCEL: {
                 handler.removeCallbacks(holdRunnable);
                 handler.removeCallbacks(edgeHoldRunnable);
+                float vx = 0f, vy = 0f;
+                if (vt != null) {
+                    vt.computeCurrentVelocity(1000);
+                    vx = vt.getXVelocity();
+                    vy = vt.getYVelocity();
+                    vt.recycle();
+                    vt = null;
+                }
                 boolean canceled = e.getActionMasked() == MotionEvent.ACTION_CANCEL;
                 boolean wasDragging = draggingPad, wasArmed = holdArmed, wasEdgePending = edgeHoldPending;
                 draggingPad = false;
@@ -501,6 +530,8 @@ class PadView extends View {
                     if (maxDisp <= tapSlop && e.getEventTime() - downTime <= TAP_MAX_MS) {
                         if (listener != null) listener.onClick();
                     }
+                } else if (moved) {
+                    flickIfAny(vx, vy);
                 } else if (!moved && maxDisp <= tapSlop
                         && e.getEventTime() - downTime <= TAP_MAX_MS) {
                     if (listener != null) listener.onClick();
@@ -509,6 +540,15 @@ class PadView extends View {
             }
         }
         return super.onTouchEvent(e);
+    }
+
+    /** 位移与速度同时达标才算甩动；否则这次手势只当作移动光标。 */
+    private void flickIfAny(float vx, float vy) {
+        if (multiFinger || maxDisp < FLICK_MIN_DISP_DP * density) return;
+        if ((float) Math.hypot(vx, vy) / density < FLICK_VEL_DP) return;
+        int axis = Math.abs(vx) >= Math.abs(vy) ? 0 : 1;
+        int sign = (axis == 0 ? vx : vy) > 0f ? 1 : -1;
+        if (listener != null) listener.onFlick(axis, sign);
     }
 
     private void resetIdle() {

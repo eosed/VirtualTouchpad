@@ -601,6 +601,14 @@ public class PadAccessibilityService extends AccessibilityService {
             dispatchLongPress(cursorX, cursorY);
         }
 
+        @Override public void onFlick(int axis, int sign) {
+            if (systemObstructed) { Logs.w(PadAccessibilityService.this, "svc", "flick blocked by obstruct"); return; }
+            Logs.w(PadAccessibilityService.this, "svc", "flick axis=" + axis + " sign=" + sign
+                    + " at " + (int) cursorX + "," + (int) cursorY);
+            showCursor();
+            dispatchSwipe(axis, sign);
+        }
+
         @Override public void onPadDrag(float totalDx, float totalDy) {
             if (padLp == null) return;
             if (!padDragging) {
@@ -628,6 +636,36 @@ public class PadAccessibilityService extends AccessibilityService {
         GestureDescription.StrokeDescription s = new GestureDescription.StrokeDescription(p, 0, durationMs);
         GestureDescription g = new GestureDescription.Builder().addStroke(s).build();
         dispatchGesture(g, null, null);
+    }
+
+    /**
+     * 甩动翻页：在光标处沿手指方向注入一段直线滑动。
+     * 整条轨迹按屏幕边界整体平移（而不是把终点截断），否则贴边时光标那一侧的偏移会让
+     * 轨迹变短、翻页被当成拖拽没松开。
+     * ponytail: 距离取短边的 35%、时长 240ms，写死；真机上偏短偏慢再调。
+     */
+    private void dispatchSwipe(int axis, int sign) {
+        int w = screenW(), h = screenH();
+        float len = Math.min(w, h) * 0.35f;
+        float half = len / 2f;
+        float cx = cursorX, cy = cursorY;
+        if (axis == 0) {
+            cx = Math.max(half, Math.min(cx, w - half));
+            float x1 = cx - sign * half, x2 = cx + sign * half;
+            Path p = new Path();
+            p.moveTo(x1, cy);
+            p.lineTo(x2, cy);
+            GestureDescription.StrokeDescription s = new GestureDescription.StrokeDescription(p, 0, 240);
+            dispatchGesture(new GestureDescription.Builder().addStroke(s).build(), null, null);
+        } else {
+            cy = Math.max(half, Math.min(cy, h - half));
+            float y1 = cy - sign * half, y2 = cy + sign * half;
+            Path p = new Path();
+            p.moveTo(cx, y1);
+            p.lineTo(cx, y2);
+            GestureDescription.StrokeDescription s = new GestureDescription.StrokeDescription(p, 0, 240);
+            dispatchGesture(new GestureDescription.Builder().addStroke(s).build(), null, null);
+        }
     }
 
     private void dispatchLongPress(float x, float y) {
