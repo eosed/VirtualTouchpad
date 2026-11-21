@@ -52,6 +52,8 @@ public class PadAccessibilityService extends AccessibilityService {
     private boolean attached;
     /** 上次已知屏幕尺寸，用来忽略纯刷新率变化触发的 onDisplayChanged。 */
     private int lastW, lastH;
+    /** 刚被「碰一下唤醒」的那次触摸，抬手时不要注入点击。 */
+    private boolean suppressNextTap;
     /** 被系统界面（锁屏/输入法/通知栏）遮挡，处于临时隐藏状态。 */
     private boolean systemObstructed;
     /** 系统是否弹出了通知栏 / 控制中心。 */
@@ -113,8 +115,10 @@ public class PadAccessibilityService extends AccessibilityService {
         super.onServiceConnected();
         instance = this;
         wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        lastW = screenW();
+        lastH = screenH();
         Logs.w(this, "svc", "connected " + Build.MODEL + " / Android " + Build.VERSION.RELEASE
-                + " / screen=" + screenW() + "x" + screenH());
+                + " / screen=" + lastW + "x" + lastH);
         displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
         try {
             displayManager.registerDisplayListener(displayListener, handler);
@@ -307,7 +311,10 @@ public class PadAccessibilityService extends AccessibilityService {
                 sizePx, sizePx,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        // 没有它系统会把窗口钳回屏幕内（实测 mAttrs 写 2016，实际 frame 被拉到 1833），
+                        // 收起贴边就永远收不进去，只能看到完整的圆。
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
         padLp.gravity = Gravity.TOP | Gravity.START;
         fitToFullScreen(padLp);
@@ -533,8 +540,12 @@ public class PadAccessibilityService extends AccessibilityService {
         }
 
         @Override public void onTouchDown() {
-            // 收起成贴边半圆时，一碰就恢复并立即可用，不用先点一下唤醒再滑
-            if (collapsed) setCollapsed(false);
+            // 收起成贴边半圆时，一碰就恢复并立即可用，不用先点一下唤醒再滑。
+            // 唤醒这最后一次抬手不该注入点击：否则点到的是光标位置，不是手指位置。
+            if (collapsed) {
+                suppressNextTap = true;
+                setCollapsed(false);
+            }
         }
 
         @Override public void onIdle() {
@@ -558,6 +569,11 @@ public class PadAccessibilityService extends AccessibilityService {
         }
 
         @Override public void onClick() {
+            if (suppressNextTap) {
+                suppressNextTap = false;
+                Logs.w(PadAccessibilityService.this, "svc", "tap skipped (wake-up)");
+                return;
+            }
             Logs.w(PadAccessibilityService.this, "svc", "tap at " + (int) cursorX + "," + (int) cursorY
                     + (systemObstructed ? " (obstructed)" : ""));
             if (systemObstructed) return;
