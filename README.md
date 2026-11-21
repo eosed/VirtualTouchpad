@@ -52,4 +52,9 @@
 
 ## 许可
 
-MIT
+[PolyForm Noncommercial License 1.0.0](LICENSE) + 商业授权，双许可。
+
+- **个人学习、研究、爱好用途**：免费使用、修改、分发，保留版权声明与署名即可
+- **商业用途**：需另行取得书面授权，见 [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md)
+
+原创作者：eosed（<https://github.com/eosed/VirtualTouchpad>）。二次开发请保留署名。
