@@ -55,18 +55,13 @@
 
 ## 签名
 
-仓库不含签名密钥。`keystore.properties` 位于仓库根目录且被 `.gitignore` 排除：
+仓库不含任何签名密钥或口令，正式的 release 包需要你自己的签名密钥：
 
-```properties
-storeFile=<keystore 绝对路径>
-storePassword=<口令>
-keyAlias=virtualtouchpad
-keyPassword=<口令>
-```
+- 密钥文件（keystore）与口令存放在仓库之外；`keystore.properties` 是仓库根目录下的本地配置，已被 `.gitignore` 排除，不随仓库分发
+- 该文件需要填写哪些字段，见 `app/build.gradle` 的 `signingConfigs.release`
+- 没有该文件时 `assembleRelease` 自动退回 debug 签名——别人 clone 下来不用配置也能编译
 
-有该文件时 `assembleRelease` 用正式密钥签名，没有时自动退回 debug 签名——所以别人 clone 下来不用配置也能编译。
-
-**密钥丢失等于永久失去对这个应用身份的更新权**，正式分发前务必备份 keystore 文件与口令，且备份应放在仓库之外。
+**密钥丢失等于永久失去对这个应用身份的更新权**，正式分发前务必备份 keystore 文件与口令，备份同样放在仓库之外。
 
 ## 许可
 

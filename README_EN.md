@@ -75,21 +75,16 @@ mainland China; replace it with the official source if you prefer.
 
 ## Signing
 
-The repository contains no signing key. `keystore.properties` lives in the repo root and is excluded by
-`.gitignore`:
+The repository ships no signing key or password; a release build needs your own:
 
-```properties
-storeFile=<absolute path to the keystore>
-storePassword=<password>
-keyAlias=virtualtouchpad
-keyPassword=<password>
-```
-
-With that file present, `assembleRelease` signs with the release key; without it, it falls back to the
-debug key — so anyone can clone and build without configuring anything.
+- Keep the keystore file and its passwords outside the repository. `keystore.properties` is a local file
+  in the repo root, excluded by `.gitignore`, and never distributed with the repo
+- For the fields it expects, see `signingConfigs.release` in `app/build.gradle`
+- Without that file, `assembleRelease` falls back to the debug key — anyone can clone and build without
+  configuring anything
 
 **Losing the key means permanently losing the ability to update this app's identity**, so back up the
-keystore file and its passwords before distributing.
+keystore file and its passwords, outside the repository as well.
 
 ## License
 
