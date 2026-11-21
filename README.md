@@ -53,15 +53,7 @@
 - 点击注入用 `AccessibilityService.dispatchGesture`，坐标是**物理屏幕坐标**；因此光标窗口也做成「窗口本身就是光标大小、用窗口坐标定位」，避免被系统 inset 下推导致光标与落点错位
 - 系统界面遮挡判定：锁屏（KeyguardManager）→ 通知栏（TYPE_SYSTEM 窗口高度 > 屏高 60%）→ 输入法（TYPE_INPUT_METHOD 窗口高度）→ 全屏（状态栏窗口消失或压成 0 高）→ 应用名单
 
-## 签名
 
-仓库不含任何签名密钥或口令，正式的 release 包需要你自己的签名密钥：
-
-- 密钥文件（keystore）与口令存放在仓库之外；`keystore.properties` 是仓库根目录下的本地配置，已被 `.gitignore` 排除，不随仓库分发
-- 该文件需要填写哪些字段，见 `app/build.gradle` 的 `signingConfigs.release`
-- 没有该文件时 `assembleRelease` 自动退回 debug 签名——别人 clone 下来不用配置也能编译
-
-**密钥丢失等于永久失去对这个应用身份的更新权**，正式分发前务必备份 keystore 文件与口令，备份同样放在仓库之外。
 
 ## 许可
 
