@@ -66,7 +66,7 @@ keyPassword=<口令>
 
 有该文件时 `assembleRelease` 用正式密钥签名，没有时自动退回 debug 签名——所以别人 clone 下来不用配置也能编译。
 
-**密钥丢失等于永久失去对这个应用身份的更新权**，正式分发前务必备份 `H:/code/keys/virtualtouchpad.jks` 与口令。
+**密钥丢失等于永久失去对这个应用身份的更新权**，正式分发前务必备份 keystore 文件与口令，且备份应放在仓库之外。
 
 ## 许可
 
