@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        列出已安装应用（「不显示摇杆的应用」名单）需要它。Android 11 起应用默认只看得到自己，
+        不声明这个权限 getInstalledApplications() 只会返回本进程；MIUI / 澎湃还会额外弹一次
+        「获取应用列表」的隐私授权。
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <application
         android:label="@string/app_name"
         android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"
@@ -48,6 +55,11 @@
                 android:resource="@xml/pad_service_config" />
         </service>
 
+        <!--
+            注意 action 名是 action.QS_TILE —— action 与 QS_TILE 之间有一个点。
+            之前写成 actionQS_TILE，系统完全不认，磁贴根本不会注册，
+            所以「控制中心里找不到开关」是这里的问题，不是 ROM 的锅。
+        -->
         <service
             android:name=".PadTileService"
             android:exported="true"
@@ -55,7 +67,7 @@
             android:label="@string/app_name"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
-                <action android:name="android.service.quicksettings.actionQS_TILE" />
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
     </application>

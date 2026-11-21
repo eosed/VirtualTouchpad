@@ -307,8 +307,10 @@ public class PadAccessibilityService extends AccessibilityService {
         pad.setLockDrag(collapsed);
         pad.setListener(padListener);
 
+        // 收起态直接按小一号建窗，免得先铺满再缩，闪一下
+        int winPx = collapsed ? Math.max(1, Math.round(sizePx * COLLAPSED_SCALE)) : sizePx;
         padLp = new WindowManager.LayoutParams(
-                sizePx, sizePx,
+                winPx, winPx,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
@@ -318,8 +320,8 @@ public class PadAccessibilityService extends AccessibilityService {
                 PixelFormat.TRANSLUCENT);
         padLp.gravity = Gravity.TOP | Gravity.START;
         fitToFullScreen(padLp);
-        padLp.x = defaultPadX(sizePx);
-        padLp.y = defaultPadY(sizePx);
+        padLp.x = defaultPadX(winPx);
+        padLp.y = defaultPadY(winPx);
         int sx = PadPrefs.padX(this), sy = PadPrefs.padY(this);
         if (sx != Integer.MIN_VALUE) padLp.x = sx;
         if (sy != Integer.MIN_VALUE) padLp.y = sy;
@@ -329,17 +331,19 @@ public class PadAccessibilityService extends AccessibilityService {
     }
 
     /**
-     * 收起：整块板滑到最近的一条竖边外面，让屏幕边界把圆裁掉一部分，
-     * 屏幕上只剩贴边的半个圆。点这半个圆即恢复。
+     * 收起：整块板滑到最近的一条竖边外面，让屏幕边界把圆裁掉大部分，
+     * 屏幕上只剩贴着边的一小截圆弧（露出多少见设置页的「收起后露出比例」）。点它即恢复。
      * ponytail: 只贴左右竖边；要贴上下边再补。
      */
-    private void collapsedPos(int sizePx) {
+    private void collapsedPos(int fullPx) {
         int w = screenW(), h = screenH();
-        boolean left = padLp.x + sizePx / 2 < w / 2;
-        int visible = Math.round(sizePx * EDGE_VISIBLE_RATIO);
-        // 圆心正好压在屏幕边上，屏幕里留下的就是半个圆
-        padLp.x = left ? visible - sizePx : w - visible;
-        padLp.y = Math.max((int) dp(80), Math.min(padLp.y, h - sizePx - (int) dp(80)));
+        int box = padLp.width;
+        boolean left = padLp.x + box / 2 < w / 2;
+        // 露出量按**屏幕上实际那个圆**的直径算（收起态自己已经缩到 0.707 倍），
+        // 圆内切于方形窗口，屏幕里留下的宽度就是窗口越界量的反向值。
+        int visible = Math.round(box * (PadPrefs.edgeRevealPercent(this) / 100f));
+        padLp.x = left ? visible - box : w - visible;
+        padLp.y = Math.max((int) dp(80), Math.min(padLp.y, h - box - (int) dp(80)));
     }
 
     /** 展开 / 收起紧凑态：重建小窗口并保持锚点，且只有在恢复时才写回用户位置。 */
@@ -356,10 +360,17 @@ public class PadAccessibilityService extends AccessibilityService {
         if (pad == null || padLp == null) { addPadWindow(); return; }
         // 只挪窗口，不重建 View：重建会丢掉闲置计时与倾摆状态，
         // 真机上 removeView/addView 偶发失败还会让摇杆整个消失。
-        int sizePx = padLp.width;
+        // 基准永远是展开态尺寸，不能读 padLp.width —— 收起时它已经被改成小窗了
+        int sizePx = (int) dp(PadPrefs.sizeDp(this));
         if (v) {
+            // 收起态整体缩小一半：窗口和 View 一起变小，视觉与手感都是小一号的圆
+            int small = Math.max(1, Math.round(sizePx * COLLAPSED_SCALE));
+            padLp.width = small;
+            padLp.height = small;
             collapsedPos(sizePx);
         } else {
+            padLp.width = sizePx;
+            padLp.height = sizePx;
             padLp.x = padRestoreX != Integer.MIN_VALUE ? padRestoreX : defaultPadX(sizePx);
             padLp.y = padRestoreY != Integer.MIN_VALUE ? padRestoreY : defaultPadY(sizePx);
         }
@@ -529,8 +540,12 @@ public class PadAccessibilityService extends AccessibilityService {
     /** 闲置 10 秒后收起成贴边小点，点一下恢复。 */
     private boolean collapsed;
     private int padRestoreX = Integer.MIN_VALUE, padRestoreY = Integer.MIN_VALUE;
-    /** 收起后屏幕里还留多少（按触控区直径的比例），0.5 就是半个圆。 */
-    private static final float EDGE_VISIBLE_RATIO = 0.5f;
+    /** 收起后屏幕里还留多少（按收起态直径的比例），由设置页的「收起后露出比例」决定。 */
+    /**
+     * 收起态的窗口直径是展开态的多少倍。1/√2 ≈ 0.707 正好让**面积**减半，
+     * 这与「缩小 50% 占用面积」对得上；直径直接减半会让面积掉到 1/4，太小不好按。
+     */
+    private static final float COLLAPSED_SCALE = 0.7071f;
     private static final int COLLAPSED_ALPHA = 35;
 
     private final PadView.Listener padListener = new PadView.Listener() {
@@ -623,6 +638,22 @@ public class PadAccessibilityService extends AccessibilityService {
     }
 
     // ---------------------------------------------------------------- api
+
+    /**
+     * 设置页拖动「收起后露出比例」时实时预览：立刻把摇杆收到贴边并按当前比例重排，
+     * 用户松手前就能看到实际露出多少，不用等闲置 10 秒。
+     */
+    static void previewEdgeReveal(Context c) {
+        PadAccessibilityService s = instance;
+        if (s == null || !s.attached || s.padLp == null) return;
+        boolean wasCollapsed = s.collapsed;
+        s.setCollapsed(true);
+        // 已经是收起态时 setCollapsed 会提前返回，这里再重排一次让新比例立刻生效
+        if (wasCollapsed && s.padLp != null) {
+            s.collapsedPos((int) s.dp(PadPrefs.sizeDp(s)));
+            s.clampPad(false);
+        }
+    }
 
     /** 供控制中心磁贴 / 主界面调用：开关变化后立即生效。 */
     static void applyEnabled(Context c) {

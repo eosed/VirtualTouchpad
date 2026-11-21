@@ -37,6 +37,13 @@ public final class PadPrefs {
         sp(c).edit().putInt("alpha", v).apply();
     }
 
+    /** 收起成贴边小点后，屏幕里还露出多少（百分比，10 ~ 100）。 */
+    public static int edgeRevealPercent(Context c) { return sp(c).getInt("edge_reveal", 25); }
+
+    public static void setEdgeRevealPercent(Context c, int v) {
+        sp(c).edit().putInt("edge_reveal", v).apply();
+    }
+
     /** 仅在展开（宽屏）状态显示。 */
     public static boolean unfoldedOnly(Context c) { return sp(c).getBoolean("unfolded_only", true); }
 

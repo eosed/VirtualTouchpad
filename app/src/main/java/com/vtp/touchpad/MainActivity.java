@@ -45,6 +45,14 @@ public class MainActivity extends Activity {
                 p -> PadPrefs.setAlphaPercent(this, 20 + p),
                 () -> PadAccessibilityService.applyEnabled(this));
 
+        // 边拖边预览：每变更一档就把摇杆收起来贴边重排，用户直接看到屏幕上只剩多少
+        bindSeek(R.id.sbReveal, 10, 100, PadPrefs.edgeRevealPercent(this) - 10,
+                p -> {
+                    PadPrefs.setEdgeRevealPercent(this, 10 + p);
+                    PadAccessibilityService.previewEdgeReveal(this);
+                },
+                null);
+
         swMaster.setChecked(PadPrefs.enabled(this));
         swMaster.setOnCheckedChangeListener((v, checked) -> {
             PadPrefs.setEnabled(this, checked);
@@ -80,7 +88,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        findViewById(R.id.btnAutostart).setOnClickListener(v -> openAutostartSettings());
+        findViewById(R.id.btnAutostart).setOnClickListener(v -> openAppInfoSettings());
 
         findViewById(R.id.btnGithub).setOnClickListener(v -> {
             try {
@@ -157,10 +165,64 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * 拿名单前先确认「看得到别的应用」。Android 11 起默认只可见本进程，
+     * MIUI / 澎湃还多一道「获取应用列表」隐私开关；任一没开，getInstalledApplications()
+     * 都只剩自己，名单会是空的。缺权限就先带去授权，而不是让用户对着空列表发愣。
+     * @return true 表示已能看到别的应用，可以往下选
+     */
+    private boolean ensureAppListAccess() {
+        if (launchableCount() >= 3) return true;
+        new AlertDialog.Builder(this)
+                .setTitle("需要「获取应用列表」权限")
+                .setMessage("要列出手机上装了哪些应用，系统必须允许本应用读取应用列表。\n\n"
+                        + "澎湃 / MIUI：应用设置 → 应用管理 → 虚拟触控板 → 权限管理 → 获取应用列表，打开后再回来。")
+                .setPositiveButton("去授权", (d, w) -> openAppListPermissionSettings())
+                .setNegativeButton("稍后", null)
+                .show();
+        return false;
+    }
+
+    /** 能启动的应用数量；权限被挡时只剩自己。 */
+    private int launchableCount() {
+        android.content.pm.PackageManager pm = getPackageManager();
+        int n = 0;
+        for (android.content.pm.ApplicationInfo ai : pm.getInstalledApplications(0)) {
+            if (ai.packageName.equals(getPackageName())) continue;
+            if (pm.getLaunchIntentForPackage(ai.packageName) != null) n++;
+        }
+        return n;
+    }
+
+    /** 「获取应用列表」在 MIUI / 澎湃的权限页里，没有公开 API，按已知组件名逐个试，都失败退应用信息页。 */
+    private void openAppListPermissionSettings() {
+        String[][] candidates = {
+                {"com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity"},
+                {"com.miui.securitycenter", "com.miui.permcenter.permissions.AppPermissionsEditorActivity"},
+                {"com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorTabActivity"},
+        };
+        for (String[] c : candidates) {
+            Intent i = new Intent();
+            i.setComponent(new ComponentName(c[0], c[1]));
+            i.putExtra("extra_pkgname", getPackageName());
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                if (getPackageManager().resolveActivity(i, 0) != null) {
+                    startActivity(i);
+                    return;
+                }
+            } catch (Exception ignored) {
+                // 试下一个候选组件
+            }
+        }
+        openAppInfoSettings();
+    }
+
+    /**
      * 勾选「在这些应用里不显示摇杆」。游戏、全屏视频没有统一的全屏信号，
      * 用用户名单是最可靠的判据；这几个应用里进入即隐藏，退出即恢复。
      */
     private void chooseHiddenApps() {
+        if (!ensureAppListAccess()) return;
         java.util.List<android.content.pm.ApplicationInfo> launchable = new java.util.ArrayList<>();
         android.content.pm.PackageManager pm = getPackageManager();
         java.util.List<android.content.pm.ApplicationInfo> all = pm.getInstalledApplications(0);
@@ -233,65 +295,63 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 各家 ROM 的自启动页面没有公开 API，只能按已知组件名逐个尝试；都打不开时退到应用详情页，
-     * 由用户自己找到「自启动 / 后台弹出界面 / 省电策略」。
+     * 各家 ROM 的自启动页组件名不公开且逐年变化，靠猜组件名跳过去经常落空。
+     * 直接进系统「应用信息」页，让用户在同一页里把省电策略改成「无限制」、顺手允许自启动。
      */
-    private void openAutostartSettings() {
-        String[][] candidates = {
-                {"com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"},
-                {"com.miui.securitycenter", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity"},
-                {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
-                {"com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"},
-                {"com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity"},
-                {"com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"},
-                {"com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity"},
-                {"com.meizu.safe", "com.meizu.safe.permission.SmartBGActivity"},
-        };
-        for (String[] c : candidates) {
-            Intent i = new Intent();
-            i.setComponent(new ComponentName(c[0], c[1]));
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            try {
-                if (getPackageManager().resolveActivity(i, 0) != null) {
-                    startActivity(i);
-                    return;
-                }
-            } catch (Exception ignored) {
-                // 试下一个候选组件
-            }
-        }
+    private void openAppInfoSettings() {
         try {
             startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.parse("package:" + getPackageName())));
-            Toast.makeText(this, "未找到自启动页面，请在应用详情里手动允许「自启动」与「后台弹出界面」",
-                    Toast.LENGTH_LONG).show();
         } catch (Exception e) {
-            Toast.makeText(this, "请手动到系统设置 → 应用管理 → 虚拟触控板，开启自启动并允许后台运行",
+            Toast.makeText(this, "请手动到系统设置 → 应用管理 → 虚拟触控板 → 应用信息",
                     Toast.LENGTH_LONG).show();
+            return;
         }
+        Toast.makeText(this,
+                "在应用信息页里把「省电策略」改为「无限制」，再把「自启动」「后台弹出界面」都允许，"
+                        + "后台就不会被系统清掉。",
+                Toast.LENGTH_LONG).show();
     }
 
-    /** 请求把磁贴加入控制中心；Android 13+ 有官方接口，低版本只能提示手动添加。 */
+
+    /**
+     * 把快捷开关加到控制中心。Android 13+ 的官方接口在 AOSP 上会弹系统确认框，
+     * 但 MIUI / 澎湃常常只回调「未添加」或干脆不响应；加不上时补一份手动路径，
+     * 那是澎湃上唯一能保证成功的办法。
+     */
     private void requestAddTile() {
+        String manual = "澎湃 / MIUI 手动添加：\n"
+                + "1. 下拉打开控制中心，点右上角的「编辑」（铅笔图标）\n"
+                + "2. 在下方「未添加的开关」里往下翻，找到「应用快捷开关」分组\n"
+                + "3. 里面有两个本应用的开关：「开关触控板」和「触控板设置」，点一下即可加上\n\n"
+                + "如果这个分组里也没有，说明系统没刷新：先把本应用打开一次，再重进控制中心编辑页。";
         if (Build.VERSION.SDK_INT >= 33) {
             try {
+                // AOSP 上系统会弹「添加功能块」确认框；MIUI / 澎湃常常直接回调失败或干脆不响应，
+                // 所以只有明确没加上时才补手动路径，免得两家都弹、用户看两遍。
                 StatusBarManager sbm = getSystemService(StatusBarManager.class);
                 ComponentName cn = new ComponentName(this, PadTileService.class);
                 sbm.requestAddTileService(cn, getString(R.string.app_name),
                         android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_pad),
                         getMainExecutor(),
-                        (result) -> Toast.makeText(this,
-                                result == StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED
-                                        ? "已加入控制中心"
-                                        : "系统未自动添加，请手动编辑控制中心",
-                                Toast.LENGTH_SHORT).show());
+                        result -> {
+                            if (result != StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED) showManualTile(manual);
+                        });
                 return;
             } catch (Exception ignored) {
-                // 部分 ROM 未实现该接口，走下面的手动提示
+                // 部分 ROM 未实现该接口，落到下面的手动指引
             }
         }
-        Toast.makeText(this, "请下拉控制中心 → 点编辑 → 在「应用快捷开关」里找到「虚拟触控板」并添加",
-                Toast.LENGTH_LONG).show();
+        showManualTile(manual);
+    }
+
+    /** 系统没帮我们加上时，把各家 ROM 手动添加的具体路径摊开讲清楚。 */
+    private void showManualTile(String manual) {
+        new AlertDialog.Builder(this)
+                .setTitle("添加控制中心快捷开关")
+                .setMessage(manual)
+                .setPositiveButton("知道了", null)
+                .show();
     }
 
     @Override
