@@ -6,4 +6,5 @@
     <string name="shortcut_toggle_long">开启或关闭虚拟触控板</string>
     <string name="shortcut_settings">触控板设置</string>
     <string name="shortcut_settings_long">调整触控区大小、速度与隐藏规则</string>
+    <string name="github_url" translatable="false">https://github.com/eosed/VirtualTouchpad</string>
 </resources>

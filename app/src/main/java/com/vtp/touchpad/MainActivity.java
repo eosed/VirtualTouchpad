@@ -81,6 +81,14 @@ public class MainActivity extends Activity {
         });
 
         findViewById(R.id.btnAutostart).setOnClickListener(v -> openAutostartSettings());
+
+        findViewById(R.id.btnGithub).setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(getString(R.string.github_url))));
+            } catch (Exception e) {
+                Toast.makeText(this, R.string.github_url, Toast.LENGTH_LONG).show();
+            }
+        });
         findViewById(R.id.btnHiddenApps).setOnClickListener(v -> chooseHiddenApps());
 
         bindStyleSpinner();
