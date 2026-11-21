@@ -50,6 +50,8 @@ public class PadAccessibilityService extends AccessibilityService {
     private CursorView cursorDot;
     private PadView pad;
     private boolean attached;
+    /** 上次已知屏幕尺寸，用来忽略纯刷新率变化触发的 onDisplayChanged。 */
+    private int lastW, lastH;
     /** 被系统界面（锁屏/输入法/通知栏）遮挡，处于临时隐藏状态。 */
     private boolean systemObstructed;
     /** 系统是否弹出了通知栏 / 控制中心。 */
@@ -61,6 +63,8 @@ public class PadAccessibilityService extends AccessibilityService {
 
     private float cursorX, cursorY;
     private int cursorSizePx;
+    /** onMove 太频繁，日志每 25 次记一条。 */
+    private int moveCount;
 
     private final Runnable hideCursor = () -> {
         if (cursorDot != null) cursorDot.setVisibility(View.INVISIBLE);
@@ -85,7 +89,9 @@ public class PadAccessibilityService extends AccessibilityService {
     private final DisplayManager.DisplayListener displayListener = new DisplayManager.DisplayListener() {
         @Override public void onDisplayAdded(int displayId) { }
         @Override public void onDisplayRemoved(int displayId) { }
-        @Override public void onDisplayChanged(int displayId) { rebuild(); }
+        // 只按尺寸变化重建。可变刷新率机型（LTPO）切换帧率时也会发 onDisplayChanged，
+        // 无条件 rebuild 会不断重挂窗口：光标回到屏幕中心且重新隐藏、闲置计时反复归零，收边永远等不到。
+        @Override public void onDisplayChanged(int displayId) { rebuildIfResized(); }
     };
 
     /** 锁屏/亮灭屏时立即重判，不等无障碍事件。 */
@@ -107,6 +113,8 @@ public class PadAccessibilityService extends AccessibilityService {
         super.onServiceConnected();
         instance = this;
         wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        Logs.w(this, "svc", "connected " + Build.MODEL + " / Android " + Build.VERSION.RELEASE
+                + " / screen=" + screenW() + "x" + screenH());
         displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
         try {
             displayManager.registerDisplayListener(displayListener, handler);
@@ -121,8 +129,21 @@ public class PadAccessibilityService extends AccessibilityService {
 
     /** 尺寸/形态变化后按当前状态重新挂载（内部会重新判定是否应显示）。 */
     private void rebuild() {
+        Logs.w(this, "svc", "rebuild w=" + screenW() + " h=" + screenH());
         detach();
         attach();
+    }
+
+    /**
+     * 只有屏幕尺寸真的变了才重建。刷新率、色彩模式等变化也会回调 onDisplayChanged，
+     * 那类回调不该动窗口。
+     */
+    private void rebuildIfResized() {
+        int w = screenW(), h = screenH();
+        if (w == lastW && h == lastH) return;
+        lastW = w;
+        lastH = h;
+        rebuild();
     }
 
     @Override
@@ -178,7 +199,7 @@ public class PadAccessibilityService extends AccessibilityService {
     public void onConfigurationChanged(android.content.res.Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         // 折叠 / 展开时屏幕尺寸变化，重建并重新钳制位置（折叠态未挂载，展开后需补挂）
-        rebuild();
+        rebuildIfResized();
     }
 
     // ---------------------------------------------------------------- windows
@@ -248,6 +269,7 @@ public class PadAccessibilityService extends AccessibilityService {
         cursorRoot = new FrameLayout(this);
         cursorRoot.setClipChildren(false);
         cursorDot = new CursorView(this);
+        Logs.w(this, "svc", "addCursor screen=" + screenW() + "x" + screenH());
         // 光标是触控区那根"拇指"的投影，随触控区等比缩放，不单独调
         int size = Math.max((int) dp(10), (int) (dp(PadPrefs.sizeDp(this)) * 0.15f));
         cursorSizePx = size;
@@ -273,6 +295,7 @@ public class PadAccessibilityService extends AccessibilityService {
     }
 
     private void addPadWindow() {
+        Logs.w(this, "svc", "addPad collapsed=" + collapsed);
         int sizePx = (int) dp(PadPrefs.sizeDp(this));
         pad = new PadView(this,
                 collapsed ? COLLAPSED_ALPHA : PadPrefs.alphaPercent(this),
@@ -322,20 +345,21 @@ public class PadAccessibilityService extends AccessibilityService {
         }
         collapsed = v;
         if (!attached) return;
-        int keepX = padLp == null ? Integer.MIN_VALUE : padLp.x;
-        int keepY = padLp == null ? Integer.MIN_VALUE : padLp.y;
-        if (pad != null) {
-            try { wm.removeView(pad); } catch (Exception ignored) { }
-            pad = null;
+        Logs.w(this, "svc", "collapsed=" + v);
+        if (pad == null || padLp == null) { addPadWindow(); return; }
+        // 只挪窗口，不重建 View：重建会丢掉闲置计时与倾摆状态，
+        // 真机上 removeView/addView 偶发失败还会让摇杆整个消失。
+        int sizePx = padLp.width;
+        if (v) {
+            collapsedPos(sizePx);
+        } else {
+            padLp.x = padRestoreX != Integer.MIN_VALUE ? padRestoreX : defaultPadX(sizePx);
+            padLp.y = padRestoreY != Integer.MIN_VALUE ? padRestoreY : defaultPadY(sizePx);
         }
-        addPadWindow();
-        if (!v && padRestoreX != Integer.MIN_VALUE) {
-            padLp.x = padRestoreX;
-            padLp.y = padRestoreY;
-            clampPad(false);
-        }
-        systemObstructed = false;
-        scheduleObstructionCheck();
+        clampPad(false);
+        pad.setLockDrag(v);
+        pad.setAlphaPercent(v ? COLLAPSED_ALPHA : PadPrefs.alphaPercent(this));
+        try { wm.updateViewLayout(pad, padLp); } catch (Exception ignored) { }
     }
 
     /**
@@ -377,6 +401,9 @@ public class PadAccessibilityService extends AccessibilityService {
 
     private void showCursor() {
         if (cursorDot == null || systemObstructed) return;
+        if (cursorDot.getVisibility() != View.VISIBLE) {
+            Logs.w(this, "svc", "cursor show at " + (int) cursorX + "," + (int) cursorY);
+        }
         cursorDot.setVisibility(View.VISIBLE);
         handler.removeCallbacks(hideCursor);
         handler.postDelayed(hideCursor, CURSOR_IDLE_HIDE_MS);
@@ -397,6 +424,7 @@ public class PadAccessibilityService extends AccessibilityService {
 
         if (hide == systemObstructed) return;
         systemObstructed = hide;
+        Logs.w(this, "svc", "obstruct=" + hide + " reasons=" + hideReasons());
         if (pad != null) pad.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
         if (hide) {
             handler.removeCallbacks(hideCursor);
@@ -411,6 +439,17 @@ public class PadAccessibilityService extends AccessibilityService {
         if (immersiveFullscreen()) return true;
         if (PadPrefs.hiddenApps(this).contains(foregroundPkg)) return true;
         return imeVisible();
+    }
+
+    /** 逐条判据的结果，只在遮挡状态变化时记一次，便于按日志定位是哪条误判。 */
+    private String hideReasons() {
+        return "screenOff=" + screenOff
+                + " keyguard=" + keyguardLocked()
+                + " shade=" + shadeVisible()
+                + " full=" + immersiveFullscreen()
+                + " ime=" + imeVisible()
+                + " fg=" + foregroundPkg
+                + " hidden=" + PadPrefs.hiddenApps(this).contains(foregroundPkg);
     }
 
     private boolean keyguardLocked() {
@@ -493,14 +532,21 @@ public class PadAccessibilityService extends AccessibilityService {
             padDragging = false;
         }
 
-        @Override public void onTouchDown() { }
+        @Override public void onTouchDown() {
+            // 收起成贴边半圆时，一碰就恢复并立即可用，不用先点一下唤醒再滑
+            if (collapsed) setCollapsed(false);
+        }
 
         @Override public void onIdle() {
+            Logs.w(PadAccessibilityService.this, "svc", "idle 10s");
             if (!collapsed) setCollapsed(true);
         }
 
         @Override public void onMove(float dx, float dy) {
-            if (systemObstructed || collapsed) return;   // 收起成贴边半圆时不推光标，点一下才恢复
+            if (systemObstructed) { Logs.w(PadAccessibilityService.this, "svc", "move blocked by obstruct"); return; }
+            if (moveCount++ % 25 == 0) {
+                Logs.w(PadAccessibilityService.this, "svc", "move d=" + (int) dx + "," + (int) dy);
+            }
             float k = PadPrefs.speed(PadAccessibilityService.this);
             cursorX += dx * k;
             cursorY += dy * k;
@@ -512,17 +558,15 @@ public class PadAccessibilityService extends AccessibilityService {
         }
 
         @Override public void onClick() {
+            Logs.w(PadAccessibilityService.this, "svc", "tap at " + (int) cursorX + "," + (int) cursorY
+                    + (systemObstructed ? " (obstructed)" : ""));
             if (systemObstructed) return;
-            if (collapsed) {          // 收起状态下点一下就是唤醒，不要点到别处
-                setCollapsed(false);
-                return;
-            }
             showCursor();
             dispatchTap(cursorX, cursorY, 60);
         }
 
         @Override public void onLongPress() {
-            if (systemObstructed || collapsed) return;
+            if (systemObstructed) return;
             dispatchLongPress(cursorX, cursorY);
         }
 

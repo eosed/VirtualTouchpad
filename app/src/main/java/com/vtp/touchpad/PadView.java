@@ -122,6 +122,16 @@ class PadView extends View {
 
     void setLockDrag(boolean v) { lockDrag = v; }
 
+    /** 收起态压暗、展开态恢复用户设定值。 */
+    void setAlphaPercent(int v) {
+        int a = Math.max(20, Math.min(90, v));
+        // 收起态要比展开态的设定值更淡，与 alphaPercent 的钳制区间无关
+        if (a == alphaPercent) return;
+        alphaPercent = a;
+        buildShaders();
+        invalidate();
+    }
+
     private void buildShaders() {
         radius = Math.min(getWidth(), getHeight()) / 2f;
         if (radius <= 0) return;

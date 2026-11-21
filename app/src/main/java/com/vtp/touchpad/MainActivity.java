@@ -89,6 +89,7 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, R.string.github_url, Toast.LENGTH_LONG).show();
             }
         });
+        findViewById(R.id.btnLog).setOnClickListener(v -> showLog());
         findViewById(R.id.btnHiddenApps).setOnClickListener(v -> chooseHiddenApps());
 
         bindStyleSpinner();
@@ -116,6 +117,43 @@ public class MainActivity extends Activity {
                         startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
                 .setNegativeButton("稍后", null)
                 .show();
+    }
+
+    /** 运行日志：先展示最近一段，再整份分享出去，方便贴到 GitHub Issues。 */
+    private void showLog() {
+        final String all = Logs.read(this);
+        if (all.isEmpty()) {
+            Toast.makeText(this, "暂无日志，先用一会儿再来看", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] lines = all.split("\n");
+        StringBuilder tail = new StringBuilder();
+        int from = Math.max(0, lines.length - 300);
+        if (from > 0) tail.append("（只显示最近 300 行，分享时包含全部 ").append(lines.length).append(" 行）\n");
+        for (int i = from; i < lines.length; i++) tail.append(lines[i]).append('\n');
+        new AlertDialog.Builder(this)
+                .setTitle("运行日志")
+                .setMessage(tail.toString())
+                .setPositiveButton("分享", (d, w) -> shareLog(all))
+                .setNeutralButton("清空", (d, w) -> {
+                    Logs.clear(this);
+                    Toast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("关闭", null)
+                .show();
+    }
+
+    private void shareLog(String text) {
+        Intent i = new Intent(Intent.ACTION_SEND);
+        i.setType("text/plain");
+        i.putExtra(Intent.EXTRA_SUBJECT, "虚拟触控板运行日志（" + Build.MODEL + "）");
+        i.putExtra(Intent.EXTRA_TEXT, "机型：" + Build.MODEL + " / Android " + Build.VERSION.RELEASE
+                + " / " + getString(R.string.app_name) + "\n\n" + text);
+        try {
+            startActivity(Intent.createChooser(i, "分享日志"));
+        } catch (Exception e) {
+            Toast.makeText(this, "没有可用的分享应用", Toast.LENGTH_SHORT).show();
+        }
     }
 
     /**

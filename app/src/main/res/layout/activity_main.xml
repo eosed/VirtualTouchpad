@@ -50,6 +50,12 @@
             android:layout_height="wrap_content"
             android:text="GitHub 项目主页（源码 / 反馈）" />
 
+        <Button
+            android:id="@+id/btnLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="查看运行日志（反馈问题用）" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
