@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">虚拟触控板</string>
+    <string name="service_desc">展开大屏后，用拇指在屏幕右下角的虚拟触控区滑动来移动光标，轻点即点击远端区域，无需换手。</string>
+    <string name="shortcut_toggle">开关触控板</string>
+    <string name="shortcut_toggle_long">开启或关闭虚拟触控板</string>
+    <string name="shortcut_settings">触控板设置</string>
+    <string name="shortcut_settings_long">调整触控区大小、速度与隐藏规则</string>
+</resources>

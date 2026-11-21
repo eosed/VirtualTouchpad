@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 静态快捷方式：显示在系统长按菜单，并出现在澎湃 OS 控制中心「应用快捷开关」分组。 -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="toggle_pad"
+        android:enabled="true"
+        android:icon="@drawable/ic_pad"
+        android:shortcutShortLabel="@string/shortcut_toggle"
+        android:shortcutLongLabel="@string/shortcut_toggle_long">
+        <intent
+            android:action="com.vtp.touchpad.TOGGLE"
+            android:targetPackage="com.vtp.touchpad"
+            android:targetClass="com.vtp.touchpad.ToggleActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="open_settings"
+        android:enabled="true"
+        android:icon="@drawable/ic_pad"
+        android:shortcutShortLabel="@string/shortcut_settings"
+        android:shortcutLongLabel="@string/shortcut_settings_long">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetPackage="com.vtp.touchpad"
+            android:targetClass="com.vtp.touchpad.MainActivity" />
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.vtp.touchpad"
+            android:targetClass="com.vtp.touchpad.MainActivity" />
+    </shortcut>
+</shortcuts>

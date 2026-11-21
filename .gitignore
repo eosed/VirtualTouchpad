@@ -1,0 +1,21 @@
+# 构建产物
+build/
+.gradle/
+*.apk
+*.aab
+*.log
+
+# 本地 SDK 路径
+local.properties
+
+# 调试用截图、脚本与临时输出（不属于源码）
+*.png
+*.jpg
+*.webp
+*.py
+*.sh
+__pycache__/
+shots/
+variants/
+*.txt
+fs.html

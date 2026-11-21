@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    android:clipToPadding="false">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <Switch
+            android:id="@+id/swMaster"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="8dp"
+            android:text="虚拟触控板总开关"
+            android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="15sp"
+            android:paddingBottom="12dp" />
+
+        <Button
+            android:id="@+id/btnSettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="开启无障碍服务（必做）" />
+
+        <Button
+            android:id="@+id/btnTile"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="把快捷开关加到控制中心" />
+
+        <Button
+            android:id="@+id/btnAutostart"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="打开自启动 / 后台运行设置" />
+
+        <Button
+            android:id="@+id/btnGithub"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="GitHub 项目主页（源码 / 反馈）" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="16dp"
+            android:paddingBottom="4dp"
+            android:text="光标速度" />
+
+        <SeekBar
+            android:id="@+id/sbSpeed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="12dp"
+            android:paddingBottom="4dp"
+            android:text="摇杆大小" />
+
+        <SeekBar
+            android:id="@+id/sbSize"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="12dp"
+            android:paddingBottom="4dp"
+            android:text="摇杆不透明度" />
+
+        <SeekBar
+            android:id="@+id/sbAlpha"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="外观风格：" />
+
+            <Spinner
+                android:id="@+id/spStyle"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <CheckBox
+            android:id="@+id/cbUnfolded"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="仅在展开（大屏）状态显示" />
+
+        <Button
+            android:id="@+id/btnHiddenApps"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="选择不显示摇杆的应用（游戏、视频等）" />
+
+        <CheckBox
+            android:id="@+id/cbFullscreen"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="全屏视频 / 游戏时自动隐藏" />
+
+        <CheckBox
+            android:id="@+id/cbRecents"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="在安卓任务列表中隐藏" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="建议先锁定后台，再打开这个隐藏开关。"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="20dp"
+            android:text="使用说明：拇指在摇杆上滑动＝移动光标；轻点（不移动、0.3 秒内松手）＝单击；按住摇杆中心不动约 0.4 秒再松手＝长按；按住外圈满 3 秒（会有一次轻振）后即可拖动摇杆到新位置；闲置 10 秒摇杆自动滑到屏幕边缘、只露出半个圆，点一下即恢复原位置。锁屏、输入法、通知栏、全屏视频与游戏时自动隐藏。"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="12dp"
+            android:text="小米 / HyperOS 提示：若「自启动」页打不开，请手动到「设置 → 应用设置 → 应用管理 → 虚拟触控板 → 权限管理」允许「后台弹出界面」，「自启动」打开，「省电策略」设为不限制；再从最近任务里下拉卡片锁定后台，避免服务被杀。"
+            android:textSize="13sp" />
+    </LinearLayout>
+</ScrollView>
