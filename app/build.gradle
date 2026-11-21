@@ -2,7 +2,7 @@ plugins {
     id 'com.android.application'
 }
 
-// 签名配置放在仓库外的 keystore.properties（已被 .gitignore 排除）
+// 签名配置读仓库根目录的 keystore.properties（本地文件，已被 .gitignore 排除）；密钥本身放在仓库外，不入库
 def ksProps = new Properties()
 def ksFile = rootProject.file('keystore.properties')
 if (ksFile.exists()) {
