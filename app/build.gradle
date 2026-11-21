@@ -2,6 +2,13 @@ plugins {
     id 'com.android.application'
 }
 
+// 签名配置放在仓库外的 keystore.properties（已被 .gitignore 排除）
+def ksProps = new Properties()
+def ksFile = rootProject.file('keystore.properties')
+if (ksFile.exists()) {
+    ksFile.withInputStream { ksProps.load(it) }
+}
+
 android {
     namespace 'com.vtp.touchpad'
     compileSdk 36
@@ -10,8 +17,8 @@ android {
         applicationId "com.vtp.touchpad"
         minSdk 26
         targetSdk 36
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1"
     }
 
     compileOptions {
@@ -19,9 +26,27 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    // 离线构建时 lint-gradle 未进缓存会导致 lintVitalRelease 失败；本项目不依赖 lint 门禁
+    lint {
+        checkReleaseBuilds false
+    }
+
+    signingConfigs {
+        release {
+            if (ksFile.exists()) {
+                storeFile file(ksProps['storeFile'])
+                storePassword ksProps['storePassword']
+                keyAlias ksProps['keyAlias']
+                keyPassword ksProps['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            // 没有 keystore.properties 时退回 debug 签名，保证别人 clone 下来也能编
+            signingConfig ksFile.exists() ? signingConfigs.release : signingConfigs.debug
         }
     }
 }

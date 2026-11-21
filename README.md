@@ -50,6 +50,21 @@
 - 点击注入用 `AccessibilityService.dispatchGesture`，坐标是**物理屏幕坐标**；因此光标窗口也做成「窗口本身就是光标大小、用窗口坐标定位」，避免被系统 inset 下推导致光标与落点错位
 - 系统界面遮挡判定：锁屏（KeyguardManager）→ 通知栏（TYPE_SYSTEM 窗口高度 > 屏高 60%）→ 输入法（TYPE_INPUT_METHOD 窗口高度）→ 全屏（状态栏窗口消失或压成 0 高）→ 应用名单
 
+## 签名
+
+仓库不含签名密钥。`keystore.properties` 位于仓库根目录且被 `.gitignore` 排除：
+
+```properties
+storeFile=<keystore 绝对路径>
+storePassword=<口令>
+keyAlias=virtualtouchpad
+keyPassword=<口令>
+```
+
+有该文件时 `assembleRelease` 用正式密钥签名，没有时自动退回 debug 签名——所以别人 clone 下来不用配置也能编译。
+
+**密钥丢失等于永久失去对这个应用身份的更新权**，正式分发前务必备份 `H:/code/keys/virtualtouchpad.jks` 与口令。
+
 ## 许可
 
 [PolyForm Noncommercial License 1.0.0](LICENSE) + 商业授权，双许可。
