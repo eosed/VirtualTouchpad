@@ -2,7 +2,6 @@ package com.vtp.touchpad;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.StatusBarManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.net.Uri;
@@ -32,7 +31,6 @@ public class MainActivity extends Activity {
         findViewById(R.id.btnSettings).setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
 
-        findViewById(R.id.btnTile).setOnClickListener(v -> requestAddTile());
 
         bindSeek(R.id.sbSpeed, 0, 100, PadPrefs.speedProgress(this),
                 p -> PadPrefs.setSpeedProgress(this, p), null);
@@ -311,47 +309,6 @@ public class MainActivity extends Activity {
                 "在应用信息页里把「省电策略」改为「无限制」，再把「自启动」「后台弹出界面」都允许，"
                         + "后台就不会被系统清掉。",
                 Toast.LENGTH_LONG).show();
-    }
-
-
-    /**
-     * 把快捷开关加到控制中心。Android 13+ 的官方接口在 AOSP 上会弹系统确认框，
-     * 但 MIUI / 澎湃常常只回调「未添加」或干脆不响应；加不上时补一份手动路径，
-     * 那是澎湃上唯一能保证成功的办法。
-     */
-    private void requestAddTile() {
-        String manual = "澎湃 / MIUI 手动添加：\n"
-                + "1. 下拉打开控制中心，点右上角的「编辑」（铅笔图标）\n"
-                + "2. 在下方「未添加的开关」里往下翻，找到「应用快捷开关」分组\n"
-                + "3. 里面有两个本应用的开关：「开关触控板」和「触控板设置」，点一下即可加上\n\n"
-                + "如果这个分组里也没有，说明系统没刷新：先把本应用打开一次，再重进控制中心编辑页。";
-        if (Build.VERSION.SDK_INT >= 33) {
-            try {
-                // AOSP 上系统会弹「添加功能块」确认框；MIUI / 澎湃常常直接回调失败或干脆不响应，
-                // 所以只有明确没加上时才补手动路径，免得两家都弹、用户看两遍。
-                StatusBarManager sbm = getSystemService(StatusBarManager.class);
-                ComponentName cn = new ComponentName(this, PadTileService.class);
-                sbm.requestAddTileService(cn, getString(R.string.app_name),
-                        android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_pad),
-                        getMainExecutor(),
-                        result -> {
-                            if (result != StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED) showManualTile(manual);
-                        });
-                return;
-            } catch (Exception ignored) {
-                // 部分 ROM 未实现该接口，落到下面的手动指引
-            }
-        }
-        showManualTile(manual);
-    }
-
-    /** 系统没帮我们加上时，把各家 ROM 手动添加的具体路径摊开讲清楚。 */
-    private void showManualTile(String manual) {
-        new AlertDialog.Builder(this)
-                .setTitle("添加控制中心快捷开关")
-                .setMessage(manual)
-                .setPositiveButton("知道了", null)
-                .show();
     }
 
     @Override

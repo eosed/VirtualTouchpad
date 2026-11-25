@@ -33,12 +33,6 @@
             android:text="开启无障碍服务（必做）" />
 
         <Button
-            android:id="@+id/btnTile"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="把快捷开关加到控制中心" />
-
-        <Button
             android:id="@+id/btnAutostart"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

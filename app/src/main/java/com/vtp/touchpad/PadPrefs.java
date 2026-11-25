@@ -10,9 +10,19 @@ public final class PadPrefs {
 
     private PadPrefs() {}
 
+    /** 进程内复用同一个实例：拖动手势与遮挡轮询都会读设置，省掉每次的名字查找。 */
+    private static SharedPreferences instance;
+
     private static SharedPreferences sp(Context c) {
-        return c.getSharedPreferences(FILE, Context.MODE_PRIVATE);
+        if (instance == null) {
+            instance = c.getApplicationContext().getSharedPreferences(FILE, Context.MODE_PRIVATE);
+        }
+        return instance;
     }
+
+    /** "不显示摇杆的应用"名单解析结果缓存，避免每轮遮挡判定都拆一次字符串。 */
+    private static java.util.Set<String> hiddenCache;
+
 
     /** 光标相对手指的倍率，1.0 ~ 4.0。 */
     public static float speed(Context c) {
@@ -30,8 +40,8 @@ public final class PadPrefs {
 
     public static void setSizeDp(Context c, int v) { sp(c).edit().putInt("size", v).apply(); }
 
-    /** 触控区不透明度，20 ~ 90（百分比）。 */
-    public static int alphaPercent(Context c) { return sp(c).getInt("alpha", 92); }
+    /** 触控区不透明度，20 ~ 90（百分比）。默认 70：再高会挡住底下的内容。 */
+    public static int alphaPercent(Context c) { return sp(c).getInt("alpha", 70); }
 
     public static void setAlphaPercent(Context c, int v) {
         sp(c).edit().putInt("alpha", v).apply();
@@ -86,16 +96,19 @@ public final class PadPrefs {
 
     /** 用户勾选「在这些应用里不显示摇杆」的包名（逗号分隔）。 */
     public static java.util.Set<String> hiddenApps(Context c) {
+        if (hiddenCache != null) return hiddenCache;
         String raw = sp(c).getString("hidden_apps", "");
         java.util.Set<String> s = new java.util.LinkedHashSet<>();
         if (raw != null && !raw.isEmpty()) {
             for (String p : raw.split(",")) if (!p.trim().isEmpty()) s.add(p.trim());
         }
+        hiddenCache = s;
         return s;
     }
 
     public static void setHiddenApps(Context c, java.util.Set<String> apps) {
         sp(c).edit().putString("hidden_apps", String.join(",", apps)).apply();
+        hiddenCache = null;
     }
 
     /** 总开关，供控制中心磁贴读写。 */

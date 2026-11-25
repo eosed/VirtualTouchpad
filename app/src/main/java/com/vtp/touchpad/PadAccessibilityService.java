@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Color;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.graphics.PixelFormat;
 import android.hardware.display.DisplayManager;
 import android.os.Build;
@@ -80,11 +81,21 @@ public class PadAccessibilityService extends AccessibilityService {
      */
     private final Runnable pollObstruction = new Runnable() {
         @Override public void run() {
-            if (!attached) return;
             updateObstruction();
-            handler.postDelayed(this, POLL_MS);
+            schedulePoll();
         }
     };
+
+    /**
+     * 轮询只为补上「进入/退出沉浸全屏」——其余判据都有无障碍事件或广播驱动。
+     * 因此关掉「全屏自动隐藏」或熄屏期间完全不排期，避免每 700ms 白醒主线程一次；
+     * 亮屏广播与设置变更会重新排期。
+     */
+    private void schedulePoll() {
+        handler.removeCallbacks(pollObstruction);
+        if (!attached || screenOff || !PadPrefs.hideInFullscreen(this)) return;
+        handler.postDelayed(pollObstruction, POLL_MS);
+    }
 
     private DisplayManager displayManager;
 
@@ -107,6 +118,7 @@ public class PadAccessibilityService extends AccessibilityService {
                 screenOff = false;
             }
             scheduleObstructionCheck();
+            schedulePoll();
         }
     };
 
@@ -115,8 +127,8 @@ public class PadAccessibilityService extends AccessibilityService {
         super.onServiceConnected();
         instance = this;
         wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-        lastW = screenW();
-        lastH = screenH();
+        lastW = measureW();
+        lastH = measureH();
         Logs.w(this, "svc", "connected " + Build.MODEL + " / Android " + Build.VERSION.RELEASE
                 + " / screen=" + lastW + "x" + lastH);
         displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
@@ -143,7 +155,7 @@ public class PadAccessibilityService extends AccessibilityService {
      * 那类回调不该动窗口。
      */
     private void rebuildIfResized() {
-        int w = screenW(), h = screenH();
+        int w = measureW(), h = measureH();
         if (w == lastW && h == lastH) return;
         lastW = w;
         lastH = h;
@@ -208,7 +220,15 @@ public class PadAccessibilityService extends AccessibilityService {
 
     // ---------------------------------------------------------------- windows
 
-    private int screenW() {
+    /**
+     * 屏幕尺寸走缓存：getCurrentWindowMetrics 是跨进程调用，而 onMove 每个触摸事件都要问
+     * 两次，遮挡判定每轮还要问几次。尺寸变化只可能来自配置变化/显示回调，那里会刷新缓存。
+     */
+    private int screenW() { return lastW; }
+
+    private int screenH() { return lastH; }
+
+    private int measureW() {
         if (Build.VERSION.SDK_INT >= 30) {
             WindowMetrics m = wm.getCurrentWindowMetrics();
             return m.getBounds().width();
@@ -218,7 +238,7 @@ public class PadAccessibilityService extends AccessibilityService {
         return dm.widthPixels;
     }
 
-    private int screenH() {
+    private int measureH() {
         if (Build.VERSION.SDK_INT >= 30) {
             WindowMetrics m = wm.getCurrentWindowMetrics();
             return m.getBounds().height();
@@ -243,13 +263,16 @@ public class PadAccessibilityService extends AccessibilityService {
     private void attach() {
         if (!PadPrefs.enabled(this)) return;
         if (PadPrefs.unfoldedOnly(this) && !isUnfolded()) return;
+        if (lastW <= 0 || lastH <= 0) {
+            lastW = measureW();
+            lastH = measureH();
+        }
         systemObstructed = false;
         addCursorWindow();
         addPadWindow();
         attached = true;
         scheduleObstructionCheck();
-        handler.removeCallbacks(pollObstruction);
-        handler.postDelayed(pollObstruction, POLL_MS);
+        schedulePoll();
     }
 
     private void detach() {
@@ -438,7 +461,10 @@ public class PadAccessibilityService extends AccessibilityService {
     /** 锁屏、输入法、通知栏/控制中心出现时把触控板与光标一起藏起来。 */
     private void updateObstruction() {
         if (!attached) return;
-        boolean hide = shouldHideForSystemUi();
+        // 窗口列表只取一次。原先四条判据各自去 getWindows 一次，一轮判定就要 3~6 次跨进程调用，
+        // 而这段代码每秒要跑一到两遍。
+        List<AccessibilityWindowInfo> ws = safeWindows();
+        boolean hide = shouldHideForSystemUi(ws);
 
         if (hide == systemObstructed) return;
         systemObstructed = hide;
@@ -450,22 +476,24 @@ public class PadAccessibilityService extends AccessibilityService {
         }
     }
 
-    private boolean shouldHideForSystemUi() {
+    private boolean shouldHideForSystemUi(List<AccessibilityWindowInfo> ws) {
+        // 先扫一遍窗口：hideReasons 日志里的 shade/full/ime 取值也靠它，短路返回时不能是上一轮的旧值。
+        scanWindows(ws);
         if (screenOff) return true;
         if (keyguardLocked()) return true;
-        if (shadeVisible()) return true;
-        if (immersiveFullscreen()) return true;
+        if (winShade) return true;
+        if (winFullscreen()) return true;
         if (PadPrefs.hiddenApps(this).contains(foregroundPkg)) return true;
-        return imeVisible();
+        return winIme;
     }
 
     /** 逐条判据的结果，只在遮挡状态变化时记一次，便于按日志定位是哪条误判。 */
     private String hideReasons() {
         return "screenOff=" + screenOff
                 + " keyguard=" + keyguardLocked()
-                + " shade=" + shadeVisible()
-                + " full=" + immersiveFullscreen()
-                + " ime=" + imeVisible()
+                + " shade=" + winShade
+                + " full=" + winFullscreen()
+                + " ime=" + winIme
                 + " fg=" + foregroundPkg
                 + " hidden=" + PadPrefs.hiddenApps(this).contains(foregroundPkg);
     }
@@ -475,52 +503,46 @@ public class PadAccessibilityService extends AccessibilityService {
         return km != null && km.isKeyguardLocked();
     }
 
+    /** 遍历窗口时复用同一个 Rect：原先每条判据、每个窗口都 new 一个，一秒要建十几个。 */
+    private final Rect winBounds = new Rect();
+    /** scanWindows 的三个结论，供 hide 判定与日志共用，不再重复扫窗口。 */
+    private boolean winShade, winIme, winSystemBar;
+
     /**
-     * 通知栏 / 控制中心是否展开：展开时状态栏会被下拉层接管，TYPE_SYSTEM 窗口高度
-     * 从一条状态栏撑到接近整屏。只认窗口尺寸，不依赖无障碍事件类名（各家 ROM 不一致）。
+     * 一次遍历同时得出三条结论：
+     *   通知栏 / 控制中心展开 —— 展开时状态栏窗口被下拉层接管，高度从一条状态栏撑到接近整屏；
+     *   输入法盖屏 —— 有 TYPE_INPUT_METHOD 窗口且高度不只是一条窄边；
+     *   状态栏是否还在 —— 全屏判定的唯一通用信号（各家 ROM 与具体 App 无关）。
+     * getWindows 需要 flagRetrieveInteractiveWindows + canRetrieveWindowContent，缺任一项会返回空列表。
      */
-    private boolean shadeVisible() {
+    private void scanWindows(List<AccessibilityWindowInfo> ws) {
         int h = screenH();
-        for (AccessibilityWindowInfo w : safeWindows()) {
-            if (w == null || w.getType() != AccessibilityWindowInfo.TYPE_SYSTEM) continue;
-            android.graphics.Rect r = new android.graphics.Rect();
-            w.getBoundsInScreen(r);
-            if (r.height() > h * 0.6f) return true;
+        boolean shade = false, ime = false, systemBar = false;
+        for (AccessibilityWindowInfo w : ws) {
+            if (w == null) continue;
+            int type = w.getType();
+            if (type != AccessibilityWindowInfo.TYPE_SYSTEM
+                    && type != AccessibilityWindowInfo.TYPE_INPUT_METHOD) continue;
+            w.getBoundsInScreen(winBounds);
+            if (type == AccessibilityWindowInfo.TYPE_SYSTEM) {
+                if (winBounds.height() > 0) systemBar = true;
+                if (winBounds.height() > h * 0.6f) shade = true;
+            } else if (winBounds.height() > h * 0.05f) {
+                ime = true;
+            }
         }
-        return false;
+        winShade = shade;
+        winIme = ime;
+        winSystemBar = systemBar;
     }
 
     /**
-     * 输入法是否盖在屏幕上：getWindows 需要 flagRetrieveInteractiveWindows +
-     * canRetrieveWindowContent，缺任一项都会返回空列表。
+     * 全屏沉浸（全屏视频、游戏）：状态栏窗口被系统收走或压成 0 高时认为进入全屏；
+     * 一个 TYPE_SYSTEM 窗口都没有也算全屏（部分 ROM 直接把状态栏移除）。
      */
-    private boolean imeVisible() {
-        int h = screenH();
-        for (AccessibilityWindowInfo w : safeWindows()) {
-            if (w == null || w.getType() != AccessibilityWindowInfo.TYPE_INPUT_METHOD) continue;
-            android.graphics.Rect r = new android.graphics.Rect();
-            w.getBoundsInScreen(r);
-            if (r.height() > h * 0.05f) return true;
-        }
-        return false;
-    }
-
-    /**
-     * 全屏沉浸（全屏视频、游戏）：状态栏窗口被系统收走或压成 0 高时认为进入全屏。
-     * 这是普通应用拿得到的唯一通用信号，不依赖具体 App 名单。
-     */
-    private boolean immersiveFullscreen() {
+    private boolean winFullscreen() {
         if (!PadPrefs.hideInFullscreen(this)) return false;
-        boolean gotsSystemUi = false;
-        for (AccessibilityWindowInfo w : safeWindows()) {
-            if (w == null || w.getType() != AccessibilityWindowInfo.TYPE_SYSTEM) continue;
-            gotsSystemUi = true;
-            android.graphics.Rect r = new android.graphics.Rect();
-            w.getBoundsInScreen(r);
-            if (r.height() > 0) return false;   // 状态栏还在 → 不是全屏
-        }
-        // 一个 TYPE_SYSTEM 窗口都没有也算全屏（部分 ROM 直接把状态栏移除）
-        return !gotsSystemUi;
+        return !winSystemBar;
     }
 
     private List<AccessibilityWindowInfo> safeWindows() {
@@ -569,7 +591,8 @@ public class PadAccessibilityService extends AccessibilityService {
         }
 
         @Override public void onMove(float dx, float dy) {
-            if (systemObstructed) { Logs.w(PadAccessibilityService.this, "svc", "move blocked by obstruct"); return; }
+            // 被遮挡时不逐条记日志：一段遮挡期间 move 事件成百上千，日志队列会被刷爆。
+            if (systemObstructed) return;
             if (moveCount++ % 25 == 0) {
                 Logs.w(PadAccessibilityService.this, "svc", "move d=" + (int) dx + "," + (int) dy);
             }

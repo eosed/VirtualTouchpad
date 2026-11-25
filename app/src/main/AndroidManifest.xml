@@ -21,6 +21,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!--
+                控制中心磁贴长按默认跳「应用信息」页，用户还得再点一层才进得来。
+                声明这个 action 后，长按直接落到本应用（AOSP 与澎湃都按此约定）。
+            -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />

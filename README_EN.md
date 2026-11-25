@@ -23,13 +23,13 @@ foldables as well (Xiaomi MIX Fold / HyperOS first).
 - **Auto hide**: hides on the lock screen, when the IME is shown, when the notification shade / control
   center is pulled down, during full-screen video and games; you can also pick apps in which it never shows
 - **Unfolded only**: hidden while the foldable is folded (short side < 600dp)
-- **Control center tile**: a Quick Settings tile and static shortcuts to toggle it from the control center
+- **Control center tile**: a bundled Quick Settings tile (pull down the control center → “edit” in the top-right → tap “Virtual Touchpad” to add it). Tapping the tile toggles the pad; **long-pressing it opens the app's settings page directly**. Two static shortcuts are also provided
 - **Three appearances**: frosted glass (matched to the original), skeuomorphic inset, joystick cap
 
 ## Installation
 
 1. Download the APK from [Releases](../../releases) and install it
-   - The current release is **v1.4.0 (signed with the release key)**. If you installed v1.0 or a debug
+   - The current release is **v1.7.2 (signed with the release key)**. If you installed v1.0 or a debug
      build before, **uninstall it first** — a different signature cannot overwrite; v1.1 and later upgrade
      in place
 2. Open the app; it asks for the accessibility permission on first launch. This is required: drawing over
@@ -50,8 +50,9 @@ foldables as well (Xiaomi MIX Fold / HyperOS first).
 
 - Full-screen detection is unreliable on some ROMs (the system does not deliver a dependable window
   signal), so the "apps that hide the joystick" list is provided as a fallback
-- Whether the Quick Settings tile appears in the HyperOS control center still needs real-device
-  confirmation
+- Adding the tile is left entirely to the system: the app no longer offers a “add it for me” button,
+  so you add it yourself from the control center's edit page (on HyperOS / MIUI it lives in the
+  “app shortcuts” group)
 - The three appearances look flatter on dark wallpapers
 
 ## Building

@@ -4,8 +4,8 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RadialGradient;
 import android.graphics.Shader;
 import android.os.Handler;
@@ -82,14 +82,10 @@ class PadView extends View {
     private static final float FLICK_VEL_DP = 900f;
     private static final float FLICK_MIN_DISP_DP = 40f;
 
-    private final Paint base = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint socket = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint shadow = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint body = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint gloss = new Paint(Paint.ANTI_ALIAS_FLAG);
-    /** 摇杆帽顶面：正中心那枚更小、略暗的小圆。 */
-    private final Paint cap = new Paint(Paint.ANTI_ALIAS_FLAG);
+    /** 当前外观的全部材质层，按叠加顺序排列；换风格时整体重建。 */
+    private final java.util.List<Layer> layers = new java.util.ArrayList<>();
+    /** 整块板的绘制范围：任何一层都只能画在这个圆里，画到圆外就会被窗口矩形切出方角。 */
+    private final Path clip = new Path();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final float slop, tapSlop, dragSlop, density;
     private Listener listener;
@@ -98,6 +94,9 @@ class PadView extends View {
     private float radius;
     /** 内盘相对中心的偏移（摇杆倾摆）。 */
     private float knobDx, knobDy;
+    /** 回弹起点，供复用的动画读取。 */
+    private float springFromX, springFromY;
+    private static final DecelerateInterpolator DECEL = new DecelerateInterpolator();
     private ValueAnimator spring;
     /** 闲置多久收起贴边，由服务端统一处理。 */
     private static final long IDLE_MS = 10000;
@@ -128,8 +127,8 @@ class PadView extends View {
         dragSlop = DRAG_SLOP_DP * density;
         this.alphaPercent = Math.max(20, Math.min(90, alphaPercent));
         this.style = style;
-        shadow.setStyle(Paint.Style.FILL);
-        gloss.setStyle(Paint.Style.FILL);
+        // 整块板的不透明度交给 View 自己，材质内部一律按素材原值画
+        setAlpha(this.alphaPercent / 100f);
         buildShaders();
     }
 
@@ -143,180 +142,194 @@ class PadView extends View {
         // 收起态要比展开态的设定值更淡，与 alphaPercent 的钳制区间无关
         if (a == alphaPercent) return;
         alphaPercent = a;
+        setAlpha(a / 100f);
         buildShaders();
         invalidate();
     }
 
+    /**
+     * 建材质：每一层都是「一枚圆 + 一道以某点为圆心的径向渐变」，
+     * 环带层再加一个环装裁剪（斜面、环线都这么做）。
+     * 全局禁止线性渐变 —— 它会在圆上切出横平竖直的硬边。
+     */
     private void buildShaders() {
         radius = Math.min(getWidth(), getHeight()) / 2f;
         if (radius <= 0) return;
-        float a = alphaPercent / 100f;
+        layers.clear();
+        // 磨砂玻璃把用户设定的不透明度直接烘进每一层：滑杆就是唯一的不透明度来源，
+        // 不再有「画到一半就到底」的固定暗底。帽体按 1.5.0 的帽体/外盘对比度（70% 时
+        // 是 0.865 对 0.70）等比放大，所以默认档位与 1.5 观感一致，往低拉才是真的变淡。
+        // 另外两种材质按素材原值（0.94）写死，再由 View.setAlpha 统一压到用户设定值。
+        final float a = alphaPercent / 100f;
+        final boolean bake = style == STYLE_GLASS;
+        setAlpha(bake ? 1f : a);
+        final float A = bake ? a : 0.94f;
+        // 1.5.0 在 70% 档位时帽体 alpha 0.865、外盘 0.70，比值即帽体的相对厚度
+        final float bodyRatio = 0.865f / 0.70f;
         float cx = getWidth() / 2f, cy = getHeight() / 2f;
         float r = radius, kr = r * KNOB_RATIO;
 
-        base.setShader(null);
-        socket.setShader(null);
-        body.setShader(null);
-        shadow.setShader(null);
-        gloss.setShader(null);
-        cap.setShader(null);
-        rim.setStyle(Paint.Style.STROKE);
-        rim.setStrokeWidth(Math.max(density, r * 0.010f));
-
         switch (style) {
             case STYLE_GLASS: {
-                // 原版观感：近乎平涂的灰白半透明外盘（边缘一道浅亮描边）
-                //            + 一枚边缘硬朗、左上受光的凸起摇杆帽
-                // 外盘：实机量出来近乎平涂的灰（220.9），只有极缓的上下明暗
-                base.setShader(new RadialGradient(cx - r * 0.10f, cy - r * 0.14f, r * 1.18f,
-                        new int[]{
-                                Color.argb((int) (255 * a), 244, 245, 248),
-                                Color.argb((int) (255 * a), 240, 241, 244),
-                                Color.argb((int) (255 * a), 236, 237, 241),
-                                Color.argb((int) (255 * a), 234, 235, 239),
-                                Color.argb((int) (255 * a), 240, 241, 245),
-                        }, new float[]{0f, 0.42f, 0.72f, 0.94f, 1f}, Shader.TileMode.CLAMP));
-                // 凹槽：帽外一圈暗环，明确分出内外两个圆
-                socket.setShader(new RadialGradient(cx, cy, kr * 1.20f,
-                        new int[]{
-                                Color.argb(0, 74, 76, 88),
-                                Color.argb(0, 74, 76, 88),
-                                Color.argb((int) (255 * 0.26f), 66, 68, 80),
-                                Color.argb(0, 74, 76, 88),
-                        }, new float[]{0f, 0.84f, 0.95f, 1f}, Shader.TileMode.CLAMP));
-                // 帽下投影：让帽子浮在外盘上
-                shadow.setShader(new RadialGradient(cx, cy + kr * 0.18f, kr * 1.02f,
-                        new int[]{
-                                Color.argb((int) (255 * 0.22f * a), 70, 72, 86),
-                                Color.argb((int) (255 * 0.10f * a), 70, 72, 86),
-                                Color.argb(0, 70, 72, 86),
-                        }, new float[]{0f, 0.72f, 1f}, Shader.TileMode.CLAMP));
-                // 帽体：左上亮、右下暗，边缘仍保持较亮，像镀了一层釉
-                // 帽体：实机内圈比外盘暗约 15 级（206.2 对 220.9），是"凹进去的圆"
-                body.setShader(new RadialGradient(cx - kr * 0.24f, cy - kr * 0.28f, kr * 1.34f,
-                        new int[]{
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 214, 215, 220),
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 210, 211, 216),
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 205, 206, 212),
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 202, 203, 209),
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 211, 212, 218),
-                        }, new float[]{0f, 0.40f, 0.72f, 0.94f, 1f}, Shader.TileMode.CLAMP));
-                // 顶面：正中心略暗的小圆，做出摇杆帽的凹顶
-                cap.setShader(new RadialGradient(cx - kr * 0.08f, cy - kr * 0.10f, kr * 0.44f,
-                        new int[]{
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 206, 207, 212),
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 209, 210, 215),
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 201, 202, 208),
-                        }, new float[]{0f, 0.62f, 1f}, Shader.TileMode.CLAMP));
-                rim.setColor(Color.argb((int) (255 * 0.22f * a), 248, 249, 252));
-                // 高光点：实机帽子上那一点左上反光
-                gloss.setShader(new RadialGradient(cx - kr * 0.34f, cy - kr * 0.36f, kr * 0.42f,
-                        new int[]{
-                                Color.argb((int) (255 * 0.18f * a), 255, 255, 255),
-                                Color.argb((int) (255 * 0.05f * a), 255, 255, 255),
-                                Color.argb(0, 255, 255, 255),
-                        }, new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+                // 1.5.0 的观感：近乎平涂的冷白玻璃外盘 + 帽外一圈暗环（凹槽）
+                //              + 左上受光的玻璃帽 + 帽沿一道细亮边 + 左上一点反光。
+                // 1.5.0 正中心那枚小圆不再画 —— 那就是「中间多了一个圆点」。
+                // 全部渐变的圆周都落在各自遮罩之外：CLAMP 边界一旦被画到，
+                // 硬件光栅器会沿那圈采出一串 1px 暗点。视觉半径不变，stops 等比压缩。
+                fill(cx - r * .10f, cy - r * .14f, r * 1.18f, r - 1f, false,
+                        new int[]{g(244, 245, 248, A), g(240, 241, 244, A), g(236, 237, 241, A),
+                                g(234, 235, 239, A), g(240, 241, 245, A)},
+                        new float[]{0f, .42f, .72f, .94f, 1f});
+                // 帽外一圈暗环：原半径 1.20kr（圆心在盘心），放大到 1.15r 后 stops 压到 .647
+                fill(cx, cy, r * 1.15f, r - 1f, false,
+                        new int[]{g(74, 76, 88, 0f), g(74, 76, 88, 0f),
+                                g(66, 68, 80, .26f), g(74, 76, 88, 0f)},
+                        new float[]{0f, .543f, .615f, .647f});
+                // 帽下投影：让帽子浮在外盘上（1.5 里是一枚偏下的暗盘，被帽体压住大半）
+                fill(cx, cy + kr * .12f, kr * 1.08f, cx, cy + kr * .18f, kr * 1.58f, true,
+                        new int[]{g(70, 72, 86, .22f * a), g(70, 72, 86, .10f * a), g(70, 72, 86, 0f)},
+                        new float[]{0f, .465f, .646f});
+                // 帽体：左上亮、右下暗，帽沿回亮一道，像镀了一层釉
+                final float bodyA = Math.min(.98f, a * bodyRatio);
+                fill(cx - kr * .24f, cy - kr * .28f, kr * 1.34f, kr, true,
+                        new int[]{g(214, 215, 220, bodyA), g(210, 211, 216, bodyA), g(205, 206, 212, bodyA),
+                                g(202, 203, 209, bodyA), g(211, 212, 218, bodyA)},
+                        new float[]{0f, .40f, .72f, .94f, 1f});
+                // 帽沿细亮边
+                ring(cx, cy, kr, Math.max(density, r * .010f), g(248, 249, 252, .22f * a), true);
+                // 左上那一点反光：渐变半径放大到遮罩之外，再等比压 stops，光斑大小不变
+                fill(cx - kr * .30f, cy - kr * .40f, kr * .70f,
+                        cx - kr * .34f, cy - kr * .36f, kr * 1.02f, true,
+                        new int[]{g(255, 255, 255, .18f * a), g(255, 255, 255, .05f * a),
+                                g(255, 255, 255, 0f)},
+                        new float[]{0f, .226f, .412f});
                 break;
             }
             case STYLE_NEUMO: {
-                // 拟物内凹：外盘左上受光、右下压暗（一条斜向明暗），
-                // 内盘是"按下去"的凹面 —— 左上暗、右下亮，与外盘明暗相反，这样一眼能看出凹陷方向。
-                base.setShader(new RadialGradient(cx - r * 0.40f, cy - r * 0.46f, r * 1.55f,
-                        new int[]{
-                                Color.argb((int) (255 * 0.94f * a), 250, 251, 253),
-                                Color.argb((int) (255 * 0.94f * a), 236, 237, 241),
-                                Color.argb((int) (255 * 0.94f * a), 216, 217, 223),
-                                Color.argb((int) (255 * 0.94f * a), 196, 197, 205),
-                        }, new float[]{0f, 0.40f, 0.74f, 1f}, Shader.TileMode.CLAMP));
-                // 凹槽：帽外一圈内阴影，左上加重的暗环把两圆分开
-                socket.setShader(new RadialGradient(cx - kr * 0.16f, cy - kr * 0.20f, kr * 1.34f,
-                        new int[]{
-                                Color.argb(0, 58, 60, 72),
-                                Color.argb(0, 58, 60, 72),
-                                Color.argb((int) (255 * 0.34f * a), 58, 60, 72),
-                                Color.argb(0, 58, 60, 72),
-                        }, new float[]{0f, 0.70f, 0.93f, 1f}, Shader.TileMode.CLAMP));
-                // 帽下的暗影很轻（凹不是凸）
-                shadow.setShader(new RadialGradient(cx, cy + kr * 0.06f, kr * 1.04f,
-                        new int[]{
-                                Color.argb((int) (255 * 0.14f * a), 64, 66, 78),
-                                Color.argb(0, 64, 66, 78),
-                        }, new float[]{0f, 1f}, Shader.TileMode.CLAMP));
-                // 凹面本体：左上暗 → 右下亮
-                body.setShader(new RadialGradient(cx - kr * 0.42f, cy - kr * 0.46f, kr * 1.46f,
-                        new int[]{
-                                Color.argb((int) (255 * (0.60f + 0.40f * a)), 189, 190, 197),
-                                Color.argb((int) (255 * (0.60f + 0.40f * a)), 203, 204, 210),
-                                Color.argb((int) (255 * (0.60f + 0.40f * a)), 226, 227, 232),
-                                Color.argb((int) (255 * (0.60f + 0.40f * a)), 243, 244, 247),
-                        }, new float[]{0f, 0.38f, 0.80f, 1f}, Shader.TileMode.CLAMP));
-                // 凹底中心：压得更暗一点，做出"坑底"
-                cap.setShader(new RadialGradient(cx - kr * 0.10f, cy - kr * 0.12f, kr * 0.52f,
-                        new int[]{
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 186, 187, 194),
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 199, 200, 207),
-                                Color.argb((int) (255 * (0.55f + 0.45f * a)), 214, 215, 221),
-                        }, new float[]{0f, 0.66f, 1f}, Shader.TileMode.CLAMP));
-                // 凹口右下那道亮边（受光的对侧）
-                rim.setColor(Color.argb((int) (255 * 0.20f * a), 255, 255, 255));
-                gloss.setShader(new RadialGradient(cx + kr * 0.40f, cy + kr * 0.44f, kr * 0.60f,
-                        new int[]{
-                                Color.argb((int) (255 * 0.16f * a), 255, 255, 255),
-                                Color.argb(0, 255, 255, 255),
-                        }, new float[]{0f, 1f}, Shader.TileMode.CLAMP));
+                // 只用阴影：整块平涂，再贴边压一圈暗；中间小圆底色暗一档、贴边更深，
+                // 于是一个是浅盘、一个是盘上的坑。整块圆内不存在任何比底色更亮的像素。
+                fill(cx, cy, r - 2f, r - 2f, false,
+                        new int[]{g(236, 237, 242, A), g(236, 237, 242, A)},
+                        new float[]{0f, 1f});
+                fill(cx, cy, r - 2f, cx, cy, r * 1.10f, false,
+                        new int[]{g(0, 0, 0, 0f), g(0, 0, 0, .11f)},
+                        new float[]{.818f, 1f});
+                // 小圆：平涂面
+                fill(cx, cy, kr * .995f, kr * .995f, true,
+                        new int[]{g(206, 208, 215, A), g(206, 208, 215, A)},
+                        new float[]{0f, 1f});
+                // 小圆的贴边内阴影
+                fill(cx, cy, kr * .995f, cx, cy, kr * 1.0945f, true,
+                        new int[]{g(0, 0, 0, 0f), g(0, 0, 0, .30f)},
+                        new float[]{.7818f, 1f});
+                // 沿口一道窄接触阴影，让坑口有厚度
+                ring(cx, cy, kr * .976f, kr * .038f, g(0, 0, 0, .13f), true);
                 break;
             }
             default: {
-                // 摇杆帽：外盘是哑光深色底座 + 环形开孔（开孔内壁一圈暗），
-                // 帽是橡胶穹顶：左上一片柔光、右下压到近黑，边缘留一道薄亮环当反光。
-                base.setShader(new RadialGradient(cx - r * 0.22f, cy - r * 0.30f, r * 1.40f,
-                        new int[]{
-                                Color.argb((int) (255 * 0.90f * a), 96, 97, 107),
-                                Color.argb((int) (255 * 0.90f * a), 74, 75, 84),
-                                Color.argb((int) (255 * 0.90f * a), 52, 53, 61),
-                                Color.argb((int) (255 * 0.90f * a), 37, 38, 45),
-                        }, new float[]{0f, 0.44f, 0.80f, 1f}, Shader.TileMode.CLAMP));
-                // 开孔内壁：帽外一圈明显暗环，下方最重
-                socket.setShader(new RadialGradient(cx, cy + kr * 0.10f, kr * 1.30f,
-                        new int[]{
-                                Color.argb(0, 12, 13, 17),
-                                Color.argb(0, 12, 13, 17),
-                                Color.argb((int) (255 * 0.55f * a), 12, 13, 17),
-                                Color.argb((int) (255 * 0.30f * a), 12, 13, 17),
-                        }, new float[]{0f, 0.68f, 0.92f, 1f}, Shader.TileMode.CLAMP));
-                // 穹顶投影：垂直下方偏移，边缘留一点余光
-                shadow.setShader(new RadialGradient(cx, cy + kr * 0.20f, kr * 1.16f,
-                        new int[]{
-                                Color.argb((int) (255 * 0.34f * a), 8, 9, 12),
-                                Color.argb((int) (255 * 0.16f * a), 8, 9, 12),
-                                Color.argb(0, 8, 9, 12),
-                        }, new float[]{0f, 0.74f, 1f}, Shader.TileMode.CLAMP));
-                // 帽体：左上 250 灰一路压到右下 58 灰，明暗跨度大才有"橡胶凸起"的体积感
-                body.setShader(new RadialGradient(cx - kr * 0.34f, cy - kr * 0.40f, kr * 1.58f,
-                        new int[]{
-                                Color.argb((int) (255 * 0.94f * a), 246, 247, 250),
-                                Color.argb((int) (255 * 0.94f * a), 206, 207, 214),
-                                Color.argb((int) (255 * 0.90f * a), 138, 139, 149),
-                                Color.argb((int) (255 * 0.88f * a), 72, 73, 83),
-                                Color.argb((int) (255 * 0.88f * a), 54, 55, 64),
-                        }, new float[]{0f, 0.34f, 0.64f, 0.88f, 1f}, Shader.TileMode.CLAMP));
-                // 亮边：只画一圈细薄的 255 白，强度压在 0.20，避免发白塑料感
-                rim.setColor(Color.argb((int) (255 * 0.20f * a), 255, 255, 255));
-                // 顶部柔光：一片大而淡的白，落在左上
-                gloss.setShader(new RadialGradient(cx - kr * 0.36f, cy - kr * 0.44f, kr * 0.86f,
-                        new int[]{
-                                Color.argb((int) (255 * 0.34f * a), 255, 255, 255),
-                                Color.argb((int) (255 * 0.10f * a), 255, 255, 255),
-                                Color.argb(0, 255, 255, 255),
-                        }, new float[]{0f, 0.48f, 1f}, Shader.TileMode.CLAMP));
+                // 同样只用阴影：深灰底座 + 更深的开孔与小圆，全靠压暗表达层次，
+                // 没有任何反光点、亮边或高光。
+                fill(cx, cy, r - 2f, r - 2f, false,
+                        new int[]{g(80, 82, 91, A), g(80, 82, 91, A)},
+                        new float[]{0f, 1f});
+                fill(cx, cy, r - 2f, cx, cy, r * 1.10f, false,
+                        new int[]{g(0, 0, 0, 0f), g(0, 0, 0, .16f)},
+                        new float[]{.818f, 1f});
+                // 小圆：平涂面
+                fill(cx, cy, kr * .995f, kr * .995f, true,
+                        new int[]{g(46, 48, 56, A), g(46, 48, 56, A)},
+                        new float[]{0f, 1f});
+                // 小圆的贴边内阴影
+                fill(cx, cy, kr * .995f, cx, cy, kr * 1.0945f, true,
+                        new int[]{g(0, 0, 0, 0f), g(0, 0, 0, .36f)},
+                        new float[]{.7636f, 1f});
+                // 沿口一道窄接触阴影
+                ring(cx, cy, kr * .9725f, kr * .045f, g(0, 0, 0, .18f), true);
                 break;
             }
         }
     }
 
+    // ---------------------------------------------------------------- 材质
+
+    /** 一层材质：一枚圆（实心或圆环）+ 一道径向渐变。 */
+    private static final class Layer {
+        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        float cx, cy, radius;
+        /** 是否属于内盘：内盘整组随倾摆平移。 */
+        boolean knob;
+    }
+
+    /** 颜色 + 材质自身透明度，整层不透明度由 View.setAlpha 统一施加。 */
+    private static int g(int red, int green, int blue, float alpha) {
+        float a = Math.max(0f, Math.min(1f, alpha));
+        return Color.argb((int) (255 * a + .5f), red, green, blue);
+    }
+
+    /**
+     * 铺一个圆面：以 view 中心为圆心、maskR 为半径画圆，圆里填一道以 (scx, scy) 为圆心、
+     * sradius 为半径的径向渐变 —— 亮暗从某点向四周摊开，不会切出横平竖直的硬边。
+     * 渐变在最外圈已经收到全透明，所以硬裁剪不会露边。
+     */
+    private void fill(float scx, float scy, float sradius, float maskR, boolean knob,
+                      int[] colors, float[] stops) {
+        fill(getWidth() / 2f, getHeight() / 2f, maskR, scx, scy, sradius, knob, colors, stops);
+    }
+
+    /** 同上，但遮罩圆可以不在盘心 —— 高光这类小圆盘要画在左上。 */
+    private void fill(float mcx, float mcy, float maskR,
+                      float scx, float scy, float sradius, boolean knob,
+                      int[] colors, float[] stops) {
+        Layer l = new Layer();
+        l.paint.setShader(new RadialGradient(scx, scy, sradius, colors, stops, Shader.TileMode.CLAMP));
+        l.cx = mcx;
+        l.cy = mcy;
+        l.radius = maskR;
+        l.knob = knob;
+        layers.add(l);
+    }
+
+    /**
+     * 刷一道环带斜面：环心在 view 中心，半径 ringR、厚度 t，渐变圆心放在受光方向外侧，
+     * 于是环的受光侧亮、背光侧暗。「凸起 / 凹陷」全靠这一道环带的明暗方向，不用任何线性渐变。
+     */
+    private void bevel(float cx, float cy, float ringR, float t,
+                       float lcx, float lcy, float gradR, boolean knob, int... colors) {
+        float[] stops = new float[colors.length];
+        for (int i = 0; i < colors.length; i++) {
+            stops[i] = i / (float) (colors.length - 1);
+        }
+        Layer l = new Layer();
+        l.paint.setShader(new RadialGradient(lcx, lcy, gradR, colors, stops, Shader.TileMode.CLAMP));
+        // 圆环用描边画：clipPath 在硬件画布上只能用二值掩膜，细环会被切成虚线
+        l.paint.setStyle(Paint.Style.STROKE);
+        l.paint.setStrokeWidth(t);
+        l.cx = cx;
+        l.cy = cy;
+        l.radius = ringR;
+        l.knob = knob;
+        layers.add(l);
+    }
+
+    /** 一圈实心环带（接触线、勾边这类没有明暗变化的线）。 */
+    private void ring(float cx, float cy, float ringR, float t, int color, boolean knob) {
+        Layer l = new Layer();
+        l.paint.setColor(color);
+        l.paint.setStyle(Paint.Style.STROKE);
+        l.paint.setStrokeWidth(t);
+        l.cx = cx;
+        l.cy = cy;
+        l.radius = ringR;
+        l.knob = knob;
+        layers.add(l);
+    }
+
     @Override
     protected void onSizeChanged(int w, int h, int ow, int oh) {
         super.onSizeChanged(w, h, ow, oh);
+        float rr = Math.min(w, h) / 2f;
+        clip.reset();
+        clip.addCircle(w / 2f, h / 2f, rr, Path.Direction.CW);
         buildShaders();
     }
 
@@ -330,21 +343,17 @@ class PadView extends View {
         float cx = getWidth() / 2f, cy = getHeight() / 2f;
         float kr = r * KNOB_RATIO;
 
-        // 1. 底座
-        canvas.drawCircle(cx, cy, r - 1f, base);
-        canvas.drawCircle(cx, cy, r - 1f, socket);
-
-        // 2. 内盘整体随倾摆平移，shader 跟着画布走，所以光感一起动
+        // 材质层按 buildShaders 里排好的顺序叠出来；内盘那几层随倾摆平移
+        // 先裁到外圆：径向渐变会一直铺到它的渐变半径，哪怕遮罩圆更小；
+        // 多出来的部分被窗口矩形一刀切，就变成四边平直、四角带弧的「方光晕」。
         canvas.save();
-        canvas.translate(knobDx, knobDy);
-        if (shadow.getShader() != null) {
-            canvas.drawCircle(cx, cy + kr * 0.12f, kr * 1.08f, shadow);
-        }
-        canvas.drawCircle(cx, cy, kr, body);
-        canvas.drawCircle(cx, cy, kr, rim);
-        if (cap.getShader() != null) canvas.drawCircle(cx, cy, kr * 0.40f, cap);
-        if (gloss.getShader() != null) {
-            canvas.drawCircle(cx - kr * 0.30f, cy - kr * 0.40f, kr * 0.70f, gloss);
+        canvas.clipPath(clip);
+        for (int i = 0; i < layers.size(); i++) {
+            Layer l = layers.get(i);
+            canvas.save();
+            if (l.knob) canvas.translate(knobDx, knobDy);
+            canvas.drawCircle(l.cx, l.cy, l.radius, l.paint);
+            canvas.restore();
         }
         canvas.restore();
     }
@@ -366,19 +375,23 @@ class PadView extends View {
         invalidate();
     }
 
+    /** 动画与插值器只建一次：每次抬手都 new 一套只是给 GC 添活。 */
     private void springBack() {
         if (knobDx == 0f && knobDy == 0f) return;
-        if (spring != null) spring.cancel();
-        float fromX = knobDx, fromY = knobDy;
-        spring = ValueAnimator.ofFloat(0f, 1f);
-        spring.setDuration(220);
-        spring.setInterpolator(new DecelerateInterpolator());
-        spring.addUpdateListener(an -> {
-            float t = 1f - an.getAnimatedFraction();
-            knobDx = fromX * t;
-            knobDy = fromY * t;
-            invalidate();
-        });
+        if (spring == null) {
+            spring = ValueAnimator.ofFloat(0f, 1f);
+            spring.setDuration(220);
+            spring.setInterpolator(DECEL);
+            spring.addUpdateListener(an -> {
+                float t = 1f - an.getAnimatedFraction();
+                knobDx = springFromX * t;
+                knobDy = springFromY * t;
+                invalidate();
+            });
+        }
+        spring.cancel();
+        springFromX = knobDx;
+        springFromY = knobDy;
         spring.start();
     }
 

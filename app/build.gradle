@@ -17,8 +17,8 @@ android {
         applicationId "com.vtp.touchpad"
         minSdk 26
         targetSdk 36
-        versionCode 5
-        versionName "1.4.0"
+        versionCode 12
+        versionName "1.7.2"
     }
 
     compileOptions {
@@ -29,6 +29,14 @@ android {
     // 离线构建时 lint-gradle 未进缓存会导致 lintVitalRelease 失败；本项目不依赖 lint 门禁
     lint {
         checkReleaseBuilds false
+    }
+
+    // kotlin-stdlib 是 AGP 带进来的传递依赖，本项目纯 Java 不用它，
+    // R8 会把类裁干净，这里再把随之打包的 .kotlin_builtins 等资源一起剔掉
+    packaging {
+        resources {
+            excludes += ['kotlin/**', 'DebugProbesKt.bin', 'META-INF/*.kotlin_module']
+        }
     }
 
     signingConfigs {
@@ -44,7 +52,10 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
+            // 纯 Java、无反射，可以直接交给 R8：未引用的类与资源一起剔掉，包体最小
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // 没有 keystore.properties 时退回 debug 签名，保证别人 clone 下来也能编
             signingConfig ksFile.exists() ? signingConfigs.release : signingConfigs.debug
         }
